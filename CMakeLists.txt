@@ -176,16 +176,20 @@ set(lib_SRCS
     lib/jobs/syncjob.cpp
     lib/jobs/mediathumbnailjob.cpp
     lib/jobs/downloadfilejob.cpp
-    lib/crypto/qolmaccount.cpp
-    lib/crypto/qolmsession.cpp
-    lib/crypto/qolminboundsession.cpp
-    lib/crypto/qolmoutboundsession.cpp
-    lib/crypto/qolmutils.cpp
-    lib/crypto/qolmutility.cpp
-    lib/crypto/qolmerrors.cpp
-    lib/crypto/qolmsession.cpp
-    lib/crypto/qolmmessage.cpp
 )
+if (${PROJECT_NAME}_ENABLE_E2EE)
+    list(APPEND lib_SRCS
+        lib/crypto/qolmaccount.cpp
+        lib/crypto/qolmsession.cpp
+        lib/crypto/qolminboundsession.cpp
+        lib/crypto/qolmoutboundsession.cpp
+        lib/crypto/qolmutils.cpp
+        lib/crypto/qolmutility.cpp
+        lib/crypto/qolmerrors.cpp
+        lib/crypto/qolmsession.cpp
+        lib/crypto/qolmmessage.cpp
+    )
+endif()
 
 set(CSAPI_DIR csapi)
 set(FULL_CSAPI_DIR lib/${CSAPI_DIR})
