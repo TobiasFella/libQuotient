@@ -7,6 +7,8 @@
 #include "connection.h"
 #include "events/encryptedfile.h"
 
+#include <QSignalSpy>
+
 using namespace Quotient;
 
 void TestOlmAccount::pickleUnpickledTest()
