@@ -88,7 +88,7 @@ public:
     QHash<QString, int> targetOneTimeKeyCounts;
 
     // A map from senderKey to InboundSession
-    QMap<QString, std::unique_ptr<QOlmSession>> sessions; // TODO: cache
+    std::map<QString, std::unique_ptr<QOlmSession>> sessions; // TODO: cache
     void updateDeviceKeys(
         const QHash<QString,
                     QHash<QString, QueryKeysJob::DeviceInformation>>& deviceKeys)
@@ -100,88 +100,58 @@ public:
             }
         }
     }
-    QString sessionDecrypt(const QOlmMessage& message, const QString& senderKey)
+    QString sessionDecryptPrekey(const QOlmMessage& message, const QString &senderKey)
     {
-        // Try to decrypt message body using one of the known sessions for that
-        // device
-        /*bool sessionsPassed = false;
-        // new e2ee TODO:
-        for (auto &senderSession : sessions) {
-            if (senderSession == sessions.last()) {
-                sessionsPassed = true;
-            }
-
-            const auto decryptedResult = senderSession->decrypt(message);
-            if (std::holds_alternative<QString>(decryptedResult)) {
-                qCDebug(E2EE)
-                    << "Success decrypting Olm event using existing session"
-                    << senderSession->sessionId();
-                return std::get<QString>(decryptedResult);
-            } else {
-                const auto error = std::get<QOlmError>(decryptedResult);
-                if (message.type() == QOlmMessage::PreKey) {
-                    const auto matches = senderSession->matchesInboundSessionFrom(senderKey, message);
-                    if (auto hasMatch = std::get_if<bool>(&matches)) {
-                        if (hasMatch) {
-                            // We had a matching session for a pre-key message, but
-                            // it didn't work. This means something is wrong, so we
-                            // fail now.
-                            qCDebug(E2EE)
-                                << "Error decrypting pre-key message with existing "
-                                   "Olm session"
-                                << senderSession->sessionId() << "reason:" << error;
-                            return QString();
-                        }
-                    }
+        Q_ASSERT(message.type() == QOlmMessage::PreKey);
+        for(auto& session : sessions) {
+            const auto matches = session.second->matchesInboundSessionFrom(senderKey, message);
+            if(std::holds_alternative<bool>(matches) && std::get<bool>(matches)) {
+                qCDebug(E2EE) << "Found inbound session";
+                const auto result = session.second->decrypt(message);
+                if(std::holds_alternative<QString>(result)) {
+                    return std::get<QString>(result);
+                } else {
+                    qCDebug(E2EE) << "Failed to decrypt prekey message";
+                    return {};
                 }
-                // Simply keep trying otherwise
             }
         }
-        if (sessionsPassed || sessions.empty()) {
-            if (message.type() != QOlmMessage::PreKey) {
-                // Not a pre-key message, we should have had a matching session
-                if (!sessions.empty()) {
-                    qCDebug(E2EE) << "Error decrypting with existing sessions";
-                    return QString();
-                }
-                qCDebug(E2EE) << "No existing sessions";
-                return QString();
+        auto newSessionResult = olmAccount->createInboundSessionFrom(senderKey.toUtf8(), message);
+        if(std::holds_alternative<QOlmError>(newSessionResult)) {
+            qCWarning(E2EE) << "Failed to create inbound session for" << senderKey;
+            return {};
+        }
+        std::unique_ptr<QOlmSession> newSession = std::move(std::get<std::unique_ptr<QOlmSession>>(newSessionResult));
+        // TODO Error handling?
+        olmAccount->removeOneTimeKeys(newSession);
+        const auto result = newSession->decrypt(message);
+        sessions[senderKey] = std::move(newSession);
+        if(std::holds_alternative<QString>(result)) {
+            return std::get<QString>(result);
+        } else {
+            qCDebug(E2EE) << "Failed to decrypt prekey message with new session";
+            return {};
+        }
+    }
+    QString sessionDecryptGeneral(const QOlmMessage& message, const QString &senderKey)
+    {
+        Q_ASSERT(message.type() == QOlmMessage::General);
+        for(auto& session : sessions) {
+            const auto result = session.second->decrypt(message);
+            if(std::holds_alternative<QString>(result)) {
+                return std::get<QString>(result);
             }
-            // We have a pre-key message without any matching session, in this
-            // case we should try to create one.
-            qCDebug(E2EE) << "try to establish new InboundSession with" << senderKey;
-            QOlmMessage preKeyMessage = QOlmMessage(message.toCiphertext(), QOlmMessage::PreKey);
-            // new e2ee TODO:
-            //const auto sessionResult = olmAccount->createInboundSessionFrom(senderKey.toUtf8(), preKeyMessage);
-
-            if (const auto error = std::get_if<QOlmError>(&sessionResult)) {
-                qCDebug(E2EE) << "Error decrypting pre-key message when trying "
-                                 "to establish a new session:"
-                              << error;
-                return QString();
-            }
-
-            const auto newSession = std::get<std::unique_ptr<QOlmSession>>(olmAccount->createInboundSessionFrom(senderKey.toUtf8(), preKeyMessage));
-
-            qCDebug(E2EE) << "Created new Olm session" << newSession->sessionId();
-
-            const auto decryptedResult = newSession->decrypt(message);
-            if (const auto error = std::get_if<QOlmError>(&decryptedResult)) {
-                qCDebug(E2EE)
-                    << "Error decrypting pre-key message with new session"
-                    << error;
-                return QString();
-            }
-
-            if (auto error = olmAccount->removeOneTimeKeys(newSession)) {
-                qCDebug(E2EE)
-                    << "Error removing one time keys"
-                    << error.value();
-            }
-            //sessions.insert(senderKey, std::move(newSession)); TODO
-            //return std::get<QString>(decryptedResult);
-        }*/
-        return QString();
+        }
+        qCWarning(E2EE) << "Failed to decrypt message";
+        return {};
+    }
+    QString sessionDecrypt(const QOlmMessage& message, const QString& senderKey)
+    {
+        if(message.type() == QOlmMessage::PreKey) {
+            return sessionDecryptPrekey(message, senderKey);
+        } else {
+            return sessionDecryptGeneral(message, senderKey);
+        }
     }
 };
 
@@ -336,7 +306,7 @@ QString EncryptionManager::sessionDecryptMessage(
         QOlmMessage preKeyMessage(body, QOlmMessage::PreKey);
         decrypted = d->sessionDecrypt(preKeyMessage, senderKey);
     } else if (type == 1) {
-        QOlmMessage message(body, QOlmMessage::PreKey);
+        QOlmMessage message(body, QOlmMessage::General);
         decrypted = d->sessionDecrypt(message, senderKey);
     }
     return decrypted;

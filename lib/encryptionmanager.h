@@ -27,8 +27,7 @@ public:
 
     void uploadIdentityKeys(Connection* connection);
     void uploadOneTimeKeys(Connection* connection, bool forceUpdate = false);
-    void
-    updateOneTimeKeyCounts(Connection* connection,
+    void updateOneTimeKeyCounts(Connection* connection,
                            const QHash<QString, int>& deviceOneTimeKeysCount);
     void updateDeviceKeys(Connection* connection,
                           const QHash<QString, QStringList>& deviceKeys);
