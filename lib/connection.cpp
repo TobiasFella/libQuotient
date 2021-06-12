@@ -458,13 +458,16 @@ void Connection::Private::completeSetup(const QString& mxId)
     AccountSettings accountSettings(data->userId());
 
     // init olmAccount
-    olmAccount = std::make_unique<QOlmAccount>(data->userId(), data->deviceId());
+    olmAccount = std::make_unique<QOlmAccount>(data->userId(), data->deviceId(), q);
+    connect(olmAccount.get(), &QOlmAccount::needsSave, q, [=](){
+        auto pickle = olmAccount->pickle(Unencrypted{});
+        AccountSettings(data->userId()).setEncryptionAccountPickle(std::get<QByteArray>(pickle));
+        //TODO handle errors
+    });
 
     if (accountSettings.encryptionAccountPickle().isEmpty()) {
         // create new account and save unpickle data
         olmAccount->createNewAccount();
-        accountSettings.setEncryptionAccountPickle(std::get<QByteArray>(olmAccount->pickle(Unencrypted{})));
-        // TODO handle pickle errors
         auto job = q->callApi<UploadKeysJob>(olmAccount->deviceKeys());
         connect(job, &BaseJob::failure, q, [=]{
             qCWarning(E2EE) << "Failed to upload device keys:" << job->errorString();
@@ -1279,7 +1282,7 @@ bool Connection::isLoggedIn() const { return !accessToken().isEmpty(); }
 #ifdef Quotient_E2EE_ENABLED
 QOlmAccount *Connection::olmAccount() const
 {
-    return d->olmAccount.get(); //d->encryptionManager->account();
+    return d->olmAccount.get();
 }
 #endif // Quotient_E2EE_ENABLED
 
